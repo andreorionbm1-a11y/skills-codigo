@@ -236,7 +236,7 @@ class Plano:
             try: w = geo.medir([p], FUENTE, tam)[0]
             except Exception: w = len(p) * tam * 0.62
             return w + 8, tam * 1.6
-        return max(18, len(re.sub(r'\\[a-zA-Z]+|[{}^_]', '', t)) * tam * 0.62 + 8), tam * 1.6
+        return max(18, len(re.sub(r'\\(text|mathrm|operatorname)|[\\{}^_]', '', t)) * tam * 0.62 + 8), tam * 1.6
     def _rotulo(s, x, y, t, tam=14, color=None):
         # texto simple en la fuente del documento; lo matemático con KaTeX
         p = s._plano_txt(t)
@@ -279,8 +279,13 @@ class Plano:
         x0, y0 = cx - w / 2, cy - h / 2
         if x0 < s.x + 2 or x0 + w > s.x + s.w or y0 < s.y - 6 or y0 + h > s.y + s.h - 2: return False
         if any(not (x0 + w + 3 < a or x0 > a + aw + 3 or y0 + h + 3 < b or y0 > b + bh + 3) for a, b, aw, bh in s._etq): return False
-        pts = [(x0 + w * i / 4, y0 + h * j / 2) for i in range(5) for j in range(3)]
-        return all(s._dseg(p, a, b) >= aire for p in pts for a, b in segs)
+        return not any(s._corta_caja(a, b, x0 - aire, y0 - aire, x0 + w + aire, y0 + h + aire) for a, b in segs)
+    def _corta_caja(s, a, b, x1, y1, x2, y2):
+        """¿El segmento a-b toca el rectángulo (x1, y1)-(x2, y2)?"""
+        if max(a[0], b[0]) < x1 or min(a[0], b[0]) > x2 or max(a[1], b[1]) < y1 or min(a[1], b[1]) > y2: return False
+        if any(x1 <= p[0] <= x2 and y1 <= p[1] <= y2 for p in (a, b)): return True
+        lados = [((x1, y1), (x2, y1)), ((x2, y1), (x2, y2)), ((x2, y2), (x1, y2)), ((x1, y2), (x1, y1))]
+        return any(s._cruce(a, b, p, q) for p, q in lados)
     def _colocar_areas(s):
         segs = s._segmentos()
         for pol, nombre in s._pend:
@@ -298,12 +303,12 @@ class Plano:
                     if all(s._dentro(p, pol) for p in caja) and s._caja_libre(c[0], c[1], w, h, segs + ed, 6) and d > best:
                         best, mejor = d, c
             if not mejor:      # región angosta: segunda pasada con la caja justa de la letra (sin achicarla)
-                hc = 15
+                hc = 19
                 for i in range(1, 60):
                     for j in range(1, 30):
                         c = (min(xs_) + (max(xs_) - min(xs_)) * i / 60, min(ys_) + (max(ys_) - min(ys_)) * j / 30)
                         caja = [(c[0] + dx * w / 2, c[1] + dy * hc / 2) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
-                        if not all(s._dentro(p, pol) for p in caja) or not s._caja_libre(c[0], c[1], w, hc, segs + ed, 1.5): continue
+                        if not all(s._dentro(p, pol) for p in caja) or not s._caja_libre(c[0], c[1], w, hc, segs + ed, 2): continue
                         d = min(s._dseg(c, a, b) for a, b in ed + segs)
                         if d > best: best, mejor = d, c
             if mejor:
@@ -408,7 +413,7 @@ class Plano:
         if any(not (bx0 + w + 3 < a or bx0 > a + aw + 3 or by0 + h + 3 < b or by0 > b + bh + 3) for a, b, aw, bh in s._etq): return False
         pts = [(bx0 + w * i / 4, by0 + h * j / 2) for i in range(5) for j in range(3)]
         if not sobre and any(s._dentro(p, pol) for p in pts for pol in s._polis): return False
-        return all(s._dseg(p, a, b) >= 4 for p in pts for a, b in segs)
+        return not any(s._corta_caja(a, b, bx0 - 4, by0 - 4, bx0 + w + 4, by0 + h + 4) for a, b in segs)
     def svg(s):
         s._colocar_curvas(); s._colocar_areas(); s._ejes_etq()
         return f'<svg width="{s.W}" height="{s.H}" viewBox="0 0 {s.W} {s.H}" style="display:block;overflow:visible">' + ''.join(s.partes) + '</svg>'
@@ -613,10 +618,33 @@ def arbol(raiz, nivel=None, sep=None, jugadores=None, subjuegos=True, resolver=F
 
 # ═════════════ Teoría de juegos: matriz de pagos ═════════════
 
-def matriz_pagos(filas, columnas, pagos, jug_fila='Jugador 1', jug_col='Jugador 2', leyenda=True):
-    """Matriz con mejores respuestas subrayadas (verde = fila, rojo = columna), Equilibrio de Nash en óvalo
-    y 'OP' (óptimo de Pareto) en su fila reservada. pagos[i][j] = (u_fila, u_col). Devuelve (html, datos)."""
+def matriz_pagos(filas, columnas, pagos, jug_fila='Jugador 1', jug_col='Jugador 2', leyenda=True, dominadas=False, mixtas=False):
+    """Matriz m×n con mejores respuestas subrayadas (verde = fila, rojo = columna), Equilibrio de Nash en óvalo
+    y 'OP' (óptimo de Pareto) en su fila reservada. pagos[i][j] = (u_fila, u_col). Devuelve (html, datos).
+    dominadas=True: eliminación iterada de estrategias estrictamente dominadas (tachadas, con su orden).
+    mixtas=True (2×2): equilibrio en estrategias mixtas; p y 1 − p bajo las filas, q y 1 − q bajo las columnas."""
     m, n = len(filas), len(columnas)
+    vivas_f, vivas_c, orden = list(range(m)), list(range(n)), []
+    if dominadas:
+        cambio = True
+        while cambio:
+            cambio = False
+            for i in list(vivas_f):
+                if any(all(pagos[k][j][0] > pagos[i][j][0] for j in vivas_c) for k in vivas_f if k != i):
+                    vivas_f.remove(i); orden.append(('fila', i)); cambio = True; break
+            if cambio: continue
+            for j in list(vivas_c):
+                if any(all(pagos[i][k][1] > pagos[i][j][1] for i in vivas_f) for k in vivas_c if k != j):
+                    vivas_c.remove(j); orden.append(('columna', j)); cambio = True; break
+    num = {('fila', i): k + 1 for k, (t, i) in enumerate(orden) if t == 'fila'}
+    num.update({('columna', j): k + 1 for k, (t, j) in enumerate(orden) if t == 'columna'})
+    mix = None
+    if mixtas and m == 2 and n == 2:
+        a = [[pagos[i][j][0] for j in range(2)] for i in range(2)]; b = [[pagos[i][j][1] for j in range(2)] for i in range(2)]
+        dq = a[0][0] - a[0][1] - a[1][0] + a[1][1]; dp = b[0][0] - b[1][0] - b[0][1] + b[1][1]
+        if dq and dp:
+            q = (a[1][1] - a[0][1]) / dq; p = (b[1][1] - b[1][0]) / dp
+            if 0 < p < 1 and 0 < q < 1: mix = {'p': p, 'q': q}
     mr_f = {(i, j) for j in range(n) for i in range(m) if pagos[i][j][0] == max(pagos[k][j][0] for k in range(m))}
     mr_c = {(i, j) for i in range(m) for j in range(n) if pagos[i][j][1] == max(pagos[i][k][1] for k in range(n))}
     en = mr_f & mr_c
@@ -632,16 +660,24 @@ def matriz_pagos(filas, columnas, pagos, jug_fila='Jugador 1', jug_col='Jugador 
            f'.mp .uf{{text-decoration:underline solid {COL["verde"]} 2px;text-underline-offset:.1em}}'
            f'.mp .uc{{text-decoration:underline solid {COL["rojo"]} 2px;text-underline-offset:.1em}}'
            f'.mp .en{{display:inline-block;border:1.5px solid {COL["tinta"]};border-radius:50%;padding:3px 12px 9px}}'
-           f'.mpl{{font-family:{FUENTE},sans-serif;font-size:13px;color:{COL["tinta"]}}}</style>')
+           f'.mpl{{font-family:{FUENTE},sans-serif;font-size:13px;color:{COL["tinta"]}}}'
+           f'.mp .tach{{text-decoration:line-through {COL["rojo"]} 2px}} .mp td.x{{color:#55524B;background:#F6F3EA}}'
+           f'.mp .ord{{font-size:11px;color:{COL["rojo"]};margin-left:3px}} .mp .pr{{display:block;font-size:11px;color:{COL["azul"]}}}</style>')
     h = [css, '<table class="mp"><tr><th></th><th></th>',
          f'<th colspan="{n}" style="color:{COL["rojo"]};font-size:14px">{jug_col}</th></tr><tr><th></th><th></th>']
-    h += [f'<th style="color:{COL["rojo"]}">{c}</th>' for c in columnas] + ['</tr>']
+    def cab(txt, tipo, k):
+        t = f'<span class="tach">{txt}</span><span class="ord">{num[(tipo, k)]}</span>' if (tipo, k) in num else txt
+        if mix: t += f'<span class="pr">{("p" if k == 0 else "1−p") if tipo == "fila" else ("q" if k == 0 else "1−q")} = {(mix["p"] if k == 0 else 1 - mix["p"]) if tipo == "fila" else (mix["q"] if k == 0 else 1 - mix["q"]):.3g}</span>'
+        return t
+    h += [f'<th style="color:{COL["rojo"]}">{cab(c, "columna", j)}</th>' for j, c in enumerate(columnas)] + ['</tr>']
     for i, f in enumerate(filas):
         h.append('<tr>')
         if i == 0: h.append(f'<th rowspan="{m}" style="color:{COL["verde"]};font-size:14px;writing-mode:vertical-rl;transform:rotate(180deg)">{jug_fila}</th>')
-        h.append(f'<th style="color:{COL["verde"]};text-align:right">{f}</th>')
+        h.append(f'<th style="color:{COL["verde"]};text-align:right">{cab(f, "fila", i)}</th>')
         for j in range(n):
             a, b = pagos[i][j]
+            if dominadas and (i not in vivas_f or j not in vivas_c):
+                h.append(f'<td class="c x"><div class="op"></div>{_num(a)}, {_num(b)}</td>'); continue
             sa = f'<span class="uf">{_num(a)}</span>' if (i, j) in mr_f else _num(a)
             sb = f'<span class="uc">{_num(b)}</span>' if (i, j) in mr_c else _num(b)
             par = f'{sa}, {sb}'
@@ -652,7 +688,15 @@ def matriz_pagos(filas, columnas, pagos, jug_fila='Jugador 1', jug_col='Jugador 
     if leyenda:
         h.append(f'<div class="mpl">○ = EN · <span style="color:{COL["verde"]}">verde</span> = mejor resp. fila · '
                  f'<span style="color:{COL["rojo"]}">rojo</span> = mejor resp. columna · <span style="color:{COL["azul"]}">OP</span> = óptimo de Pareto</div>')
-    datos = {'nash': [(filas[i], columnas[j]) for i, j in sorted(en)], 'pareto': [(filas[i], columnas[j]) for i, j in sorted(op)]}
+    if leyenda and orden:
+        h.append('<div class="mpl">Eliminación de dominadas: ' + ' · '.join(
+            f'{k + 1}) {filas[i] if t == "fila" else columnas[i]}' for k, (t, i) in enumerate(orden)) + '</div>')
+    if leyenda and mix:
+        h.append(f'<div class="mpl">Equilibrio en mixtas: <span style="color:{COL["azul"]}">p</span> hace indiferente a {jug_col}; '
+                 f'<span style="color:{COL["azul"]}">q</span> hace indiferente a {jug_fila}</div>')
+    datos = {'nash': [(filas[i], columnas[j]) for i, j in sorted(en)], 'pareto': [(filas[i], columnas[j]) for i, j in sorted(op)],
+             'eliminadas': [(t, filas[i] if t == 'fila' else columnas[i]) for t, i in orden],
+             'sobreviven': ([filas[i] for i in vivas_f], [columnas[j] for j in vivas_c]), 'mixta': mix}
     return ''.join(h), datos
 
 
@@ -974,3 +1018,142 @@ def errores_tipo(mu0, mu1, sigma, alfa=0.05, ancho=560, alto=300, nx=r'\bar X'):
     out.append(formula_svg(x0, ly + 46, rf'\text{{Potencia}} = 1-\beta = {1 - beta:.4f}', 13, alinear='izq', ancho=260))
     svg = f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>'
     return svg, {'critico': cv, 'alfa': alfa, 'beta': beta, 'potencia': 1 - beta}
+
+
+# ═════════════ Incertidumbre ═════════════
+
+def _inversa(f, y, a, b):
+    for _ in range(80):
+        m = (a + b) / 2
+        if f(m) < y: a = m
+        else: b = m
+    return (a + b) / 2
+
+def incertidumbre(w1, w2, p, u=None, ancho=520, alto=400, nu='U(w)'):
+    """Agente averso al riesgo: riqueza w1 con probabilidad p y w2 con 1 − p; u cóncava (por omisión √w).
+    Dibuja U(w), la cuerda entre los dos resultados, E[w], E[U], U(E[w]), el equivalente cierto (EC) y la
+    prima de riesgo PR = E[w] − EC en rojo. Devuelve (svg, datos)."""
+    u = u or math.sqrt
+    u1, u2 = u(w1), u(w2)
+    Ew = p * w1 + (1 - p) * w2; EU = p * u1 + (1 - p) * u2
+    EC = _inversa(u, EU, 0, w2 * 2); PR = Ew - EC
+    g = Plano(ancho, alto, xr=(0, w2 * 1.12), yr=(0, u(w2 * 1.12) * 1.08), margen=(30, 60, 50, 74))
+    g.curva(u, 0, w2 * 1.12, color=COL['azul'], nombre=nu)
+    cuerda = lambda w: u1 + (u2 - u1) * (w - w1) / (w2 - w1)
+    g.curva(cuerda, w1, w2, color=COL['gris'], grosor=1.6, punteada=True)
+    g.ejes('w', 'U')
+    g.punto(w1, u1, 'w_1', None); g.punto(w2, u2, 'w_2', None)
+    g.punto(Ew, u(Ew), None, 'U(E[w])', guias='y')
+    g.punto(Ew, EU, 'E[w]', 'E[U]', color=COL['tinta'])
+    g.punto(EC, EU, r'\text{EC}', None, color=COL['verde'])
+    y = g.Y(EU) + 7
+    g.partes.append(f'<path d="M{_f(g.X(EC))},{_f(y)} L{_f(g.X(Ew))},{_f(y)}" stroke="{COL["rojo"]}" stroke-width="3"/>')
+    g._guias.append(((g.X(EC), y), (g.X(Ew), y)))
+    g._pend_puntos.append(((g.X(EC) + g.X(Ew)) / 2, y + 4, r'\text{PR}', COL['rojo']))
+    return g.svg(), {'Ew': Ew, 'EU': EU, 'EC': EC, 'PR': PR, 'U_Ew': u(Ew)}
+
+
+# ═════════════ Más mercados ═════════════
+
+def externalidad(D, CMg, social, xr, yr, tipo='negativa', ancho=520, alto=380):
+    """Externalidad. tipo='negativa': social = CMg social (arriba del privado); se produce de más.
+    tipo='positiva': social = beneficio marginal social (arriba de la demanda); se produce de menos.
+    Marca el equilibrio de mercado (Q^m) y el óptimo social (Q^*), y la PBS entre ambos. Devuelve (svg, datos)."""
+    Qm = interseccion(D, CMg, *xr)[0]
+    Qs = interseccion(D if tipo == 'negativa' else social, social if tipo == 'negativa' else CMg, *xr)[0]
+    g = Plano(ancho, alto, xr=xr, yr=yr)
+    if tipo == 'negativa':
+        g.area(social, D, Qs, Qm, COL['rojo'], .3, r'\text{PBS}')
+        g.curva(D, color=COL['azul'], nombre='D').curva(CMg, color=COL['rojo'], nombre=r'\text{CMg}_P').curva(social, color=COL['ocre'], nombre=r'\text{CMg}_S')
+        Ps = D(Qs)
+    else:
+        g.area(social, CMg, Qm, Qs, COL['rojo'], .3, r'\text{PBS}')
+        g.curva(D, color=COL['azul'], nombre=r'\text{BMg}_P').curva(social, color=COL['ocre'], nombre=r'\text{BMg}_S').curva(CMg, color=COL['rojo'], nombre=r'\text{CMg}')
+        Ps = CMg(Qs)
+    g.ejes('Q', 'P').punto(Qm, D(Qm), 'Q^m', 'P^m').punto(Qs, Ps, 'Q^*', 'P^*')
+    return g.svg(), {'Qm': Qm, 'Pm': D(Qm), 'Qs': Qs, 'Ps': Ps}
+
+def control_precio(D, S, precio, xr, yr, ancho=520, alto=380):
+    """Precio máximo (debajo del equilibrio → escasez) o mínimo (arriba → excedente), con la PBS.
+    Devuelve (svg, datos) con Qd, Qs, faltante o sobrante."""
+    q0 = interseccion(D, S, *xr)[0]; p0 = D(q0)
+    Qd = interseccion(D, lambda q: precio, *xr)[0]; Qs = interseccion(S, lambda q: precio, *xr)[0]
+    maximo = precio < p0
+    g = Plano(ancho, alto, xr=xr, yr=yr)
+    a, b = (Qs, q0) if maximo else (Qd, q0)
+    g.area(D, S, a, b, COL['rojo'], .3, r'\text{PBS}')
+    g.curva(D, color=COL['azul'], nombre='D').curva(S, color=COL['rojo'], nombre='S')
+    g.curva(lambda q: precio, color=COL['tinta'], grosor=1.8, nombre=r'P_{\max}' if maximo else r'P_{\min}', punteada=False)
+    g.ejes('Q', 'P').punto(q0, p0, 'Q^*', 'P^*')
+    g.punto(Qs if maximo else Qd, precio, 'Q^S' if maximo else 'Q^D', None)
+    g.punto(Qd if maximo else Qs, precio, 'Q^D' if maximo else 'Q^S', None)
+    xm = (g.X(Qs) + g.X(Qd)) / 2
+    g._pend_puntos.append((xm, g.Y(precio), r'\text{Escasez}' if maximo else r'\text{Excedente}', COL['tinta']))
+    return g.svg(), {'Q*': q0, 'P*': p0, 'Qd': Qd, 'Qs': Qs, ('faltante' if maximo else 'sobrante'): abs(Qd - Qs)}
+
+def arancel(D, S, Pw, t, xr, yr, ancho=560, alto=400):
+    """Arancel t sobre el precio mundial Pw: importaciones antes y después, ingreso arancelario (azul) y las dos
+    PBS (producción y consumo, rojas). Devuelve (svg, datos)."""
+    Qs1 = interseccion(S, lambda q: Pw, *xr)[0]; Qd1 = interseccion(D, lambda q: Pw, *xr)[0]
+    Qs2 = interseccion(S, lambda q: Pw + t, *xr)[0]; Qd2 = interseccion(D, lambda q: Pw + t, *xr)[0]
+    g = Plano(ancho, alto, xr=xr, yr=yr)
+    g.area(lambda q: Pw + t, lambda q: Pw, Qs2, Qd2, COL['azul'], .25, r'\text{R}')
+    g.area(S, lambda q: Pw, Qs1, Qs2, COL['rojo'], .3, r'\text{PBS}')
+    g.area(D, lambda q: Pw, Qd2, Qd1, COL['rojo'], .3, r'\text{PBS}')
+    g.curva(D, color=COL['azul'], nombre='D').curva(S, color=COL['rojo'], nombre='S')
+    g.curva(lambda q: Pw, color=COL['tinta'], grosor=1.6, nombre='P_w', punteada=False)
+    g.curva(lambda q: Pw + t, color=COL['tinta'], grosor=1.6, nombre='P_w + t', punteada=False)
+    g.ejes('Q', 'P')
+    for q, e in ((Qs1, 'Q^S_1'), (Qs2, 'Q^S_2'), (Qd2, 'Q^D_2'), (Qd1, 'Q^D_1')):
+        g.punto(q, Pw if e.endswith('1') else Pw + t, e, None)
+    return g.svg(), {'importaciones_antes': Qd1 - Qs1, 'importaciones_despues': Qd2 - Qs2, 'ingreso_arancel': t * (Qd2 - Qs2),
+                     'pbs': 0.5 * t * (Qs2 - Qs1) + 0.5 * t * (Qd1 - Qd2)}
+
+
+# ═════════════ Intervalos de confianza ═════════════
+
+def intervalos_confianza(mu, sigma, n, k=20, nivel=0.95, semilla=1, ancho=520, alto=None, nx=r'\bar X'):
+    """k intervalos de confianza de muestras simuladas de tamaño n alrededor de la media verdadera μ (línea azul).
+    Los que no contienen a μ van en rojo. Ilustra qué significa el nivel de confianza. Devuelve (svg, datos)."""
+    rnd = random.Random(semilla); se = sigma / math.sqrt(n); z = cuantil(1 - (1 - nivel) / 2)
+    xs = [rnd.gauss(mu, se) for _ in range(k)]
+    alto = alto or 90 + k * 14
+    g = Plano(ancho, alto, xr=(mu - 4.2 * se, mu + 4.2 * se), yr=(0, k + 1), margen=(40, 30, 46, 30))
+    dentro = 0
+    for i, x in enumerate(xs):
+        ok = x - z * se <= mu <= x + z * se; dentro += ok
+        c = COL['tinta'] if ok else COL['rojo']; y = g.Y(k - i)
+        g.partes += [f'<path d="M{_f(g.X(x - z * se))},{_f(y)} L{_f(g.X(x + z * se))},{_f(y)}" stroke="{c}" stroke-width="{1.6 if ok else 2.4}"/>',
+                     f'<circle cx="{_f(g.X(x))}" cy="{_f(y)}" r="2.6" fill="{c}"/>']
+    g.vertical(mu, color=COL['azul'], punteada=True)
+    g.partes.append(formula_svg(g.X(mu), g.y - 22, r'\mu', 15, color=COL['azul']))
+    g.ejes(nx, '', marcas_x=[round(mu + d * se, 3) for d in (-3, -2, -1, 0, 1, 2, 3)], flechas=False)
+    g.partes.append(_t(g.x + g.w, 16, f'{dentro} de {k} contienen a μ (nivel {nivel:.0%})', 13, 'end', COL['rojo'] if dentro < k else COL['verde'], 700))
+    return g.svg(), {'contienen': dentro, 'k': k, 'margen': z * se}
+
+
+# ═════════════ Consumidor y productor ═════════════
+
+def consumidor(a, px, py, I, ancho=480, alto=420):
+    """Cobb-Douglas U = x^a·y^(1−a) con restricción px·x + py·y = I: recta presupuestaria, tres curvas de
+    indiferencia (la del óptimo tangente) y la canasta óptima A. Devuelve (svg, datos)."""
+    xo, yo = a * I / px, (1 - a) * I / py; Uo = xo ** a * yo ** (1 - a)
+    g = Plano(ancho, alto, xr=(0, I / px * 1.25), yr=(0, I / py * 1.25), margen=(30, 60, 50, 56))
+    for k, (U, nom) in enumerate(((Uo * .65, 'U_1'), (Uo, 'U_2'), (Uo * 1.4, 'U_3'))):
+        g.curva(lambda x, U=U: (U / x ** a) ** (1 / (1 - a)) if x > 0 else 1e9, 0.02, I / px * 1.25,
+                color=COL['azul'] if k == 1 else COL['gris'], grosor=2.2 if k == 1 else 1.5, nombre=nom)
+    g.curva(lambda x: (I - px * x) / py, 0, I / px, color=COL['rojo'], nombre=r'\text{RP}')
+    g.ejes('x', 'y').punto(xo, yo, 'x^*', 'y^*', nombre=r'\text{A}')
+    return g.svg(), {'x': xo, 'y': yo, 'U': Uo, 'TMS': a / (1 - a) * yo / xo}
+
+def productor(a, b, w, r, Q, ancho=480, alto=420):
+    """Cobb-Douglas Q = L^a·K^b: isocuanta de Q, isocosto mínimo tangente y dos isocostos de referencia.
+    Devuelve (svg, datos) con L*, K* y el costo mínimo."""
+    c = (b * w) / (a * r); L = (Q / c ** b) ** (1 / (a + b)); K = c * L; C = w * L + r * K
+    g = Plano(ancho, alto, xr=(0, C / w * 1.3), yr=(0, C / r * 1.3), margen=(30, 60, 50, 56))
+    g.curva(lambda l: (Q / l ** a) ** (1 / b) if l > 0 else 1e9, 0.02, C / w * 1.3, color=COL['azul'], nombre='Q_0')
+    for f, nom in ((0.7, 'C_1'), (1.0, 'C^*'), (1.35, 'C_2')):
+        g.curva(lambda l, f=f: (C * f - w * l) / r, 0, C * f / w, color=COL['rojo'] if f == 1 else COL['gris'],
+                grosor=2.2 if f == 1 else 1.5, nombre=nom, punteada=f != 1)
+    g.ejes('L', 'K').punto(L, K, 'L^*', 'K^*', nombre=r'\text{E}')
+    return g.svg(), {'L': L, 'K': K, 'C': C}
