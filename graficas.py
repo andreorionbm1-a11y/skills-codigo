@@ -1169,6 +1169,7 @@ _SIMB = {r'\cdot': '·', r'\leq': '≤', r'\geq': '≥', r'\le': '≤', r'\ge': 
          r'\infty': '∞', r'\to': '→', r'\pm': '±', r'\mid': '|'}
 CSS_MANO = ("<style>.fx .mano{font-family:Kalam,cursive;font-size:1.05em;line-height:1;white-space:nowrap}"
             ".fx .mano sub{font-size:max(.72em,10px);vertical-align:-.28em}.fx .mano sup{font-size:max(.72em,10px);vertical-align:.55em}"
+            ".fx .mano .ss{display:inline-block;font-size:max(.72em,10px);line-height:.9;vertical-align:-.42em;text-align:left;margin-left:1px}"
             ".fx .mano .bar{text-decoration:overline;text-decoration-thickness:1.3px}"
             ".fx .mano .hat{position:relative}.fx .mano .hat::before{content:'^';position:absolute;left:50%;top:-.55em;transform:translateX(-50%);font-size:.8em}</style>")
 
@@ -1184,6 +1185,8 @@ def tex_a_mano(t):
     t = re.sub(r'\\(bar|hat)\s*([A-Za-zα-ωΔ])', lambda m: f'<span class="{m.group(1)}">{m.group(2)}</span>', t)
     t = re.sub(r'_\{([^{}]*)\}|_(\S)', lambda m: f'<sub>{m.group(1) or m.group(2)}</sub>', t)
     t = re.sub(r'\^\{([^{}]*)\}|\^(\S)', lambda m: f'<sup>{m.group(1) or m.group(2)}</sup>', t)
+    t = re.sub(r'<sub>([^<]*)</sub><sup>([^<]*)</sup>|<sup>([^<]*)</sup><sub>([^<]*)</sub>',   # q_2^C: índices apilados
+               lambda m: f'<span class="ss">{m.group(2) or m.group(3)}<br>{m.group(1) or m.group(4)}</span>', t)
     t = t.replace('\\,', ' ').replace('\\ ', ' ').replace(r'\;', ' ')
     return None if ('\\' in t or '{' in t or '}' in t) else t
 
