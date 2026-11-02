@@ -27,6 +27,8 @@ CASOS = {
     'mano_impuesto':  (['gen_mano.py', 'gen_impuesto.py', '{o}/m_imp.html', '-', '0.8', '600'], 'm_imp.html', ['--ancho', '900'], 0),
     'mano_nuevas':    (['gen_mano.py', 'gen_nuevas.py', '{o}/m_nuevas.html'], 'm_nuevas.html', ['--ancho', '960'], 0),
     'mano_extra':     (['gen_mano.py', 'gen_extra.py', '{o}/m_extra.html'], 'm_extra.html', ['--ancho', '960'], 0),
+    'mano_mojado':    (['gen_mano.py', '--relleno', 'mojado', 'gen_impuesto.py', '{o}/m_moj.html', '-', '2', '820'], 'm_moj.html', ['--ancho', '900'], 0),
+    'mano_mojado2':   (['gen_mano.py', '--relleno', 'mojado', 'gen_nuevas.py', '{o}/m_moj2.html'], 'm_moj2.html', ['--ancho', '960'], 0),
     'pie':            ('casos', 'pie.html', ['--ancho', '794', '--pdf'], 0),
     'mal':            ('casos', 'mal.html', ['--ancho', '900'], 3),
     'notacion':       ('casos', 'notacion.html', ['--ancho', '900'], 3),

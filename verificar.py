@@ -91,7 +91,7 @@ JS = r"""
   for (const it of items) if (!it.mat && it.fs < 10) out.push({tipo:'LETRA < 10px', detalle:name(it.el)});
   // 5. SVG: líneas/flechas que atraviesan texto
   for (const g of document.querySelectorAll('svg line, svg path, svg polyline')) {
-    if (!vis(g) || !g.getTotalLength || g.closest('.katex')) continue;
+    if (!vis(g) || !g.getTotalLength || g.closest('.katex') || g.closest('.relleno')) continue;   // .relleno = textura de un área, no una línea
     let L; try { L = g.getTotalLength(); } catch(e) { continue; }
     if (!L) continue;
     const m = g.getScreenCTM(); if (!m) continue;
@@ -180,7 +180,7 @@ JS = r"""
   }
   // 10. SVG: curvas (no subrayados) que rozan una etiqueta
   for (const g of document.querySelectorAll('svg path, svg polyline')) {
-    if (!vis(g) || !g.getTotalLength || g.closest('.katex')) continue;
+    if (!vis(g) || !g.getTotalLength || g.closest('.katex') || g.closest('.relleno')) continue;
     const bb = g.getBoundingClientRect(); if (bb.height < 10 || bb.width < 10) continue;
     let Lg; try { Lg = g.getTotalLength(); } catch(e) { continue; }
     const m = g.getScreenCTM(); if (!m || !Lg) continue;
@@ -230,7 +230,7 @@ JS = r"""
     if ([...el.childNodes].some(x => x.nodeType===3 && x.textContent.trim())) sum(rgb(el.closest('svg') ? s.fill : s.color));
     if (s.textDecorationLine.includes('underline')) sum(rgb(s.textDecorationColor));
     if (parseFloat(s.borderTopWidth) > 0 || parseFloat(s.borderBottomWidth) > 0) sum(rgb(s.borderBottomColor));
-    if (el.closest('svg') && !['text','tspan'].includes(el.tagName)) { if (s.stroke !== 'none') sum(rgb(s.stroke)); }
+    if (el.closest('svg') && !el.closest('.relleno') && !['text','tspan'].includes(el.tagName)) { if (s.stroke !== 'none') sum(rgb(s.stroke)); }
   }
   const lin = x => { x/=255; return x<=0.04045 ? x/12.92 : ((x+0.055)/1.055)**2.4; };
   const lab = ([r,g,b]) => { const R=lin(r),G=lin(g),B=lin(b);

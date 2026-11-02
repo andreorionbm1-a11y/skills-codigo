@@ -8,6 +8,7 @@ COL = dict(azul='#2F6FD6', rojo='#C93636', verde='#237A3E', ocre='#86672A', mora
            tinta='#1D1D1D', gris='#8A8A8A', tenue='#CFCAC0')
 FUENTE = "Kalam"
 ESTILO = 'limpio'   # 'mano' = trazo de lápiz fino (pulso de la mano + fórmulas simples en letra manuscrita)
+RELLENO = 'acuarela'   # áreas en estilo mano: 'acuarela' (acuarela + lápiz esfumado, principal) | 'mojado' (marcatextos mojado) | 'liso'
 
 def _t(x, y, s, tam=13, anc='middle', color=None, peso=400):
     return (f'<text x="{_f(x)}" y="{_f(y)}" text-anchor="{anc}" font-size="{tam}" font-weight="{peso}" '
@@ -1233,9 +1234,69 @@ def a_mano(svg, semilla=None):
     partes = re.split(r'(<defs>.*?</defs>|<marker.*?</marker>|<clipPath.*?</clipPath>)', svg, flags=re.S)
     for i in range(0, len(partes), 2): partes[i] = re.sub(r'<path [^>]*?/>', trazo, partes[i])
     svg = ''.join(partes)
+    uid = f'm{rnd.randint(0, 10**7)}'
     def area(m):
-        pts = _pts(m.group(1))
-        if len(pts) < 3: return m.group(0)
-        return m.group(0).replace(m.group(1), ' '.join(f'{x:.1f},{y:.1f}' for x, y in _temblor(pts, rnd, .55, 6, cerrar=True)))
-    svg = re.sub(r'<polygon points="([^"]*)"', area, svg)
+        tag, pts = m.group(0), _pts(m.group(1))
+        if len(pts) < 3: return tag
+        if RELLENO in ('acuarela', 'mojado') and re.search(r'fill="(?!none)', tag):
+            color = re.search(r'fill="([^"]*)"', tag).group(1)
+            op = float((re.search(r'fill-opacity="([\d.]+)"', tag) or [0, .25])[1])
+            return _relleno(pts, color, op, rnd, uid)
+        return tag.replace(m.group(1), ' '.join(f'{x:.1f},{y:.1f}' for x, y in _temblor(pts, rnd, .55, 6, cerrar=True)))
+    svg = re.sub(r'<polygon points="([^"]*)"[^>]*?/>', area, svg)
+    def cerrada(m):   # regiones bajo campanas: <path d="M… Z" fill=color> sin borde
+        tag = m.group(0)
+        if re.search(r'[CQAHVSTcqahvst]', m.group(1)) or 'stroke=' in tag: return tag
+        color = re.search(r'fill="([^"]*)"', tag).group(1)
+        op = float((re.search(r'fill-opacity="([\d.]+)"', tag) or [0, .3])[1])
+        return _relleno(_pts(m.group(1)), color, op, rnd, uid)
+    if RELLENO in ('acuarela', 'mojado'):
+        svg = re.sub(r'<path d="([^"]*Z)"[^>]*fill="(?!none)[^"]*"[^>]*/>', cerrada, svg)
+        svg = re.sub(r'(<svg[^>]*>)', lambda m: m.group(1) + _FILTROS.replace('{u}', uid), svg, count=1)
     return re.sub(r'(<svg[^>]*>)', lambda m: m.group(1) + CSS_MANO, svg, count=1)
+
+# Rellenos "dibujados" de las áreas (solo en ESTILO = 'mano'). Cada relleno va en <g class="relleno">:
+# el verificador no los trata como líneas, y conserva la forma exacta (transparente) para sus revisiones.
+_FILTROS = ('<defs>'
+    '<filter id="{u}ac" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="3" seed="5" result="t"/>'
+    '<feDisplacementMap in="SourceGraphic" in2="t" scale="5" result="d"/><feTurbulence type="fractalNoise" baseFrequency=".6" numOctaves="2" seed="9" result="g"/>'
+    '<feColorMatrix in="g" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -.9 1.15" result="gm"/><feComposite in="d" in2="gm" operator="in"/></filter>'
+    '<filter id="{u}or" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="3" seed="5" result="t"/>'
+    '<feDisplacementMap in="SourceGraphic" in2="t" scale="5" result="d"/><feGaussianBlur in="d" stdDeviation=".7"/></filter>'
+    '<filter id="{u}es"><feTurbulence type="fractalNoise" baseFrequency=".05" numOctaves="2" seed="13" result="t"/>'
+    '<feDisplacementMap in="SourceGraphic" in2="t" scale="4" result="d"/><feGaussianBlur in="d" stdDeviation="1.6" result="b"/>'
+    '<feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="1" seed="4" result="n"/>'
+    '<feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -.8 1.1" result="m"/><feComposite in="b" in2="m" operator="in"/></filter>'
+    '<filter id="{u}mo" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency=".04" numOctaves="3" seed="11" result="t"/>'
+    '<feDisplacementMap in="SourceGraphic" in2="t" scale="8" result="d"/><feGaussianBlur in="d" stdDeviation="2.2"/></filter>'
+    '</defs>')
+
+def _barrido(pts, ang, sep):
+    """Rectas paralelas a 'ang' grados, separadas 'sep' px, que cubren el polígono."""
+    c, s_ = math.cos(math.radians(ang)), math.sin(math.radians(ang))
+    pr = [-s_ * x + c * y for x, y in pts]; lg = [c * x + s_ * y for x, y in pts]
+    l0, l1, k, out = min(lg) - 4, max(lg) + 4, min(pr) + sep / 2, []
+    while k < max(pr):
+        out.append(((c * l0 - s_ * k, s_ * l0 + c * k), (c * l1 - s_ * k, s_ * l1 + c * k))); k += sep
+    return out
+
+def _relleno(pts, color, op, rnd, uid):
+    dp = lambda q: 'M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in q)
+    poly = ' '.join(f'{x:.1f},{y:.1f}' for x, y in pts)
+    cid = f'{uid}c{rnd.randint(0, 10**7)}'
+    d = dp(_temblor(pts, rnd, 1.6, 7, cerrar=True)) + ' Z'
+    forma = f'<polygon class="relleno-forma" points="{poly}" fill="{color}" fill-opacity="0" stroke="none"/>'
+    orilla = lambda w, a: f'<path d="{d}" fill="none" stroke="{color}" stroke-opacity="{a:.2f}" stroke-width="{w}" filter="url(#{uid}or)"/>'
+    if RELLENO == 'mojado':   # marcatextos sobre papel mojado: franjas anchas que se corren
+        fr = ''.join(f'<path d="{dp(_temblor([a, b], rnd, .9, 8))}"/>' for a, b in _barrido(pts, -14 + rnd.uniform(-2, 2), 9))
+        cuerpo = (f'<clipPath id="{cid}"><path d="{d}"/></clipPath><g clip-path="url(#{cid})" fill="none" stroke="{color}" '
+                  f'stroke-opacity="{min(.5, op * 1.1):.2f}" stroke-width="13" stroke-linecap="round" filter="url(#{uid}mo)" '
+                  f'style="mix-blend-mode:multiply">{fr}</g>' + orilla(1.8, min(.7, op * 1.5)))
+    else:                     # acuarela con lápiz de color esfumado encima
+        zz = []
+        for i, (a, b) in enumerate(_barrido(pts, -60 + rnd.uniform(-3, 3), 2.6)): zz += [a, b] if i % 2 == 0 else [b, a]
+        cuerpo = (f'<path d="{d}" fill="{color}" fill-opacity="{min(.6, op * .85):.2f}" filter="url(#{uid}ac)"/>' + orilla(1.6, min(.8, op * 1.6))
+                  + f'<clipPath id="{cid}"><polygon points="{poly}"/></clipPath><g clip-path="url(#{cid})" fill="none" stroke="{color}" '
+                  f'stroke-linejoin="round" stroke-linecap="round" filter="url(#{uid}es)"><path d="{dp(_temblor(zz, rnd, 1.0, 7))}" '
+                  f'stroke-width="2.2" stroke-opacity="{min(1, op * 2.0):.2f}"/></g>')
+    return f'<g class="relleno">{cuerpo}{forma}</g>'
