@@ -7,6 +7,7 @@ from geo import _f, formula_svg
 COL = dict(azul='#2F6FD6', rojo='#C93636', verde='#237A3E', ocre='#86672A', morado='#6847F0',
            tinta='#1D1D1D', gris='#8A8A8A', tenue='#CFCAC0')
 FUENTE = "Kalam"
+ESTILO = 'limpio'   # 'mano' = trazo de lápiz fino (pulso de la mano + fórmulas simples en letra manuscrita)
 
 def _t(x, y, s, tam=13, anc='middle', color=None, peso=400):
     return (f'<text x="{_f(x)}" y="{_f(y)}" text-anchor="{anc}" font-size="{tam}" font-weight="{peso}" '
@@ -236,7 +237,7 @@ class Plano:
             try: w = geo.medir([p], FUENTE, tam)[0]
             except Exception: w = len(p) * tam * 0.62
             return w + 8, tam * 1.6
-        return max(18, len(re.sub(r'\\(text|mathrm|operatorname)|[\\{}^_]', '', t)) * tam * 0.62 + 8), tam * 1.6
+        return max(18, len(re.sub(r'\\(text|mathrm|operatorname)|[\\{}^_]', '', t)) * tam * 0.62 + 8), tam * (1.8 if ESTILO == 'mano' else 1.6)
     def _rotulo(s, x, y, t, tam=14, color=None):
         # texto simple en la fuente del documento; lo matemático con KaTeX
         p = s._plano_txt(t)
@@ -345,7 +346,7 @@ class Plano:
         x0, y0 = s.X(s.xr[0]), s.Y(s.yr[0])
         ys = sorted(s._ylab); colocadas = []
         for Y, t in ys:
-            h = 16
+            h = 24 if ESTILO == 'mano' else 16   # la letra manuscrita es más alta que KaTeX
             yy = max(Y, colocadas[-1][0] + h) if colocadas else Y
             colocadas.append((yy, Y, t))
         for yy, Y, t in colocadas:
@@ -416,7 +417,7 @@ class Plano:
         return not any(s._corta_caja(a, b, bx0 - 4, by0 - 4, bx0 + w + 4, by0 + h + 4) for a, b in segs)
     def svg(s):
         s._colocar_curvas(); s._colocar_areas(); s._ejes_etq()
-        return f'<svg width="{s.W}" height="{s.H}" viewBox="0 0 {s.W} {s.H}" style="display:block;overflow:visible">' + ''.join(s.partes) + '</svg>'
+        return _fin(f'<svg width="{s.W}" height="{s.H}" viewBox="0 0 {s.W} {s.H}" style="display:block;overflow:visible">' + ''.join(s.partes) + '</svg>')
 
 def interseccion(f, g, a, b, n=400):
     """Todas las x en [a, b] donde f = g (bisección)."""
@@ -613,7 +614,7 @@ def arbol(raiz, nivel=None, sep=None, jugadores=None, subjuegos=True, resolver=F
     enps = [((jugadores or {}).get(d['n']['j'], 'J' + d['n']['j']), ' → '.join(d['ruta']) or 'inicio', elegido[id(d)])
             for d in sorted(nodos, key=lambda d: (d['prof'], d['x'])) if id(d) in elegido]
     datos = {'estrategias': estr, 'enps': enps if resolver and perfecta else None, 'info_perfecta': perfecta}
-    return (f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>', datos)
+    return (_fin(f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>'), datos)
 
 
 # ═════════════ Teoría de juegos: matriz de pagos ═════════════
@@ -849,7 +850,7 @@ def linea_tiempo(eventos, ancho=900, tam=13, ancho_etq=150, color=None):
                 f'<rect x="{_f(izq)}" y="{_f(top)}" width="{_f(w)}" height="{_f(h)}" rx="6" fill="#FFFFFF" stroke="{COL["tenue"]}"/>',
                 _t(izq + 6, top + lh, str(anio), tam, 'start', COL['rojo'], 700)]
         for i, l in enumerate(ls): out.append(_t(izq + 6, top + lh * (i + 2), l, tam, 'start'))
-    return f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block">' + ''.join(out) + '</svg>'
+    return _fin(f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block">' + ''.join(out) + '</svg>')
 
 
 # ═════════════ Oligopolio ═════════════
@@ -977,7 +978,7 @@ def prueba_hipotesis(estadistico, alfa=0.05, cola='bilateral', dist='normal', df
     else: pie = f'p = {p:.4f}'
     dec = 'Se rechaza H₀' if rech else 'No se rechaza H₀'
     out.append(_t(x0 + w, 16, f'{dec}' + (f'  ({pie})' if pie else ''), 13, 'end', COL['rojo'] if rech else COL['verde'], 700))
-    svg = f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>'
+    svg = _fin(f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>')
     return svg, {'criticos': cs, 'p': p, 'decision': 'Se rechaza H0' if rech else 'No se rechaza H0'}
 
 def errores_tipo(mu0, mu1, sigma, alfa=0.05, ancho=560, alto=300, nx=r'\bar X'):
@@ -1016,7 +1017,7 @@ def errores_tipo(mu0, mu1, sigma, alfa=0.05, ancho=560, alto=300, nx=r'\bar X'):
         out += [f'<rect x="{x0}" y="{_f(y - 7)}" width="16" height="12" fill="{col}" fill-opacity="{op}" stroke="{col}"/>',
                 formula_svg(x0 + 24, y, tex, 13, alinear='izq', ancho=110), _t(x0 + 140, y + 4, txt, 13, 'start')]
     out.append(formula_svg(x0, ly + 46, rf'\text{{Potencia}} = 1-\beta = {1 - beta:.4f}', 13, alinear='izq', ancho=260))
-    svg = f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>'
+    svg = _fin(f'<svg width="{ancho}" height="{alto}" viewBox="0 0 {ancho} {alto}" style="display:block;overflow:visible">' + ''.join(out) + '</svg>')
     return svg, {'critico': cv, 'alfa': alfa, 'beta': beta, 'potencia': 1 - beta}
 
 
@@ -1157,3 +1158,81 @@ def productor(a, b, w, r, Q, ancho=480, alto=420):
                 grosor=2.2 if f == 1 else 1.5, nombre=nom, punteada=f != 1)
     g.ejes('L', 'K').punto(L, K, 'L^*', 'K^*', nombre=r'\text{E}')
     return g.svg(), {'L': L, 'K': K, 'C': C}
+
+
+# ───────────── Estilo "a mano" (lápiz fino) ─────────────
+# Activar: graficas.ESTILO = 'mano' (todas las gráficas siguientes) o a_mano(svg) sobre un SVG suelto.
+# Solo cambia el dibujo: posiciones, cálculos y colocación de rótulos son los mismos que en 'limpio'.
+_GRIEGAS = dict(alpha='α', beta='β', gamma='γ', delta='δ', theta='θ', lambda_='λ', mu='μ', sigma='σ', pi='π',
+                rho='ρ', tau='τ', epsilon='ε', varepsilon='ε', Delta='Δ', chi='χ', omega='ω', phi='φ', eta='η', pi_='π')
+_SIMB = {r'\cdot': '·', r'\leq': '≤', r'\geq': '≥', r'\le': '≤', r'\ge': '≥', r'\neq': '≠', r'\times': '×',
+         r'\infty': '∞', r'\to': '→', r'\pm': '±', r'\mid': '|'}
+CSS_MANO = ("<style>.fx .mano{font-family:Kalam,cursive;font-size:1.05em;line-height:1;white-space:nowrap}"
+            ".fx .mano sub{font-size:max(.72em,10px);vertical-align:-.28em}.fx .mano sup{font-size:max(.72em,10px);vertical-align:.55em}"
+            ".fx .mano .bar{text-decoration:overline;text-decoration-thickness:1.3px}"
+            ".fx .mano .hat{position:relative}.fx .mano .hat::before{content:'^';position:absolute;left:50%;top:-.55em;transform:translateX(-50%);font-size:.8em}</style>")
+
+def _fin(svg): return a_mano(svg) if ESTILO == 'mano' else svg
+
+def tex_a_mano(t):
+    """LaTeX simple → HTML en letra manuscrita (sub/superíndices, barra, gorro, griegas). None si es complejo (se queda en KaTeX)."""
+    if re.search(r'\\(frac|dfrac|sqrt|sum|prod|int|begin|left|right|binom|overline|underbrace|lim)', t): return None
+    t = re.sub(r'\\(text|mathrm|operatorname)\{([^{}]*)\}', r'\2', t)
+    for k, v in _SIMB.items(): t = t.replace(k, v)
+    for k, v in _GRIEGAS.items(): t = re.sub(r'\\' + k.rstrip('_') + r'(?![a-zA-Z])', v, t)
+    t = re.sub(r'\\(bar|hat)\s*\{([^{}]*)\}', lambda m: f'<span class="{m.group(1)}">{m.group(2)}</span>', t)
+    t = re.sub(r'\\(bar|hat)\s*([A-Za-zα-ωΔ])', lambda m: f'<span class="{m.group(1)}">{m.group(2)}</span>', t)
+    t = re.sub(r'_\{([^{}]*)\}|_(\S)', lambda m: f'<sub>{m.group(1) or m.group(2)}</sub>', t)
+    t = re.sub(r'\^\{([^{}]*)\}|\^(\S)', lambda m: f'<sup>{m.group(1) or m.group(2)}</sup>', t)
+    t = t.replace('\\,', ' ').replace('\\ ', ' ').replace(r'\;', ' ')
+    return None if ('\\' in t or '{' in t or '}' in t) else t
+
+class _Pulso:
+    def __init__(s, rnd, amp): s.c = [(amp * w, l * rnd.uniform(.8, 1.25), rnd.uniform(0, 6.3)) for w, l in ((.75, 70), (.35, 23))]
+    def __call__(s, t): return sum(a * math.sin(t / l + p) for a, l, p in s.c)
+
+def _pts(d):
+    n = re.findall(r'-?\d+(?:\.\d+)?', d); return [(float(n[i]), float(n[i + 1])) for i in range(0, len(n) - 1, 2)]
+
+def _temblor(pts, rnd, amp, paso=5, cerrar=False):
+    """Remuestrea la polilínea y la mueve en perpendicular con ruido suave (pulso de la mano)."""
+    if cerrar: pts = pts + [pts[0]]
+    out, L, r = [], 0, _Pulso(rnd, amp)
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        seg = math.hypot(x2 - x1, y2 - y1)
+        if seg < 1e-6: continue
+        nx, ny, k = -(y2 - y1) / seg, (x2 - x1) / seg, max(1, int(seg / paso))
+        for i in range(k):
+            t = i / k; d = r(L + seg * t); out.append((x1 + (x2 - x1) * t + nx * d, y1 + (y2 - y1) * t + ny * d))
+        L += seg
+    if not out: return pts
+    if not cerrar: out.append(pts[-1])
+    return out
+
+def a_mano(svg, semilla=None):
+    """Trazo de lápiz fino: cada línea con el pulso suave de la mano y puntas redondas, áreas con borde
+    ligeramente irregular (mismo relleno liso) y fórmulas simples en letra manuscrita. Determinista."""
+    rnd = random.Random(semilla if semilla is not None else sum(map(ord, svg[:4000])))
+    def letra(m):
+        h = tex_a_mano(m.group(1).replace('&quot;', '"').replace('&lt;', '<').replace('&amp;', '&'))
+        return m.group(0) if h is None else f'<span class="mano">{h}</span>'
+    svg = re.sub(r'<span data-tex="([^"]*)"></span>', letra, svg)
+    def trazo(m):
+        tag = m.group(0); md = re.search(r' d="([^"]*)"', tag)
+        if not md or re.search(r'[CQAHVSTcqahvst]', md.group(1)) or re.search(r'fill="(?!none)', tag): return tag
+        subs = [_pts(t) for t in md.group(1).split('M') if t.strip()]   # cada 'M' es un trazo aparte
+        if any(len(q) < 2 for q in subs) or not subs: return tag
+        sw = float((re.search(r'stroke-width="([\d.]+)"', tag) or [0, 1])[1])
+        d = ' '.join('M' + ' L'.join(f'{x:.1f},{y:.1f}' for x, y in _temblor(q, rnd, 1.1 * (.6 if sw < 1.3 else 1))) for q in subs)
+        nuevo = tag.replace(md.group(0), f' d="{d}"')
+        if 'fill=' not in nuevo: nuevo = nuevo.replace('<path ', '<path fill="none" ', 1)   # una línea con pulso ya no es recta: sin esto se rellena de negro
+        return nuevo if 'stroke-linecap' in nuevo else nuevo.replace('<path ', '<path stroke-linecap="round" stroke-linejoin="round" ', 1)
+    partes = re.split(r'(<defs>.*?</defs>|<marker.*?</marker>|<clipPath.*?</clipPath>)', svg, flags=re.S)
+    for i in range(0, len(partes), 2): partes[i] = re.sub(r'<path [^>]*?/>', trazo, partes[i])
+    svg = ''.join(partes)
+    def area(m):
+        pts = _pts(m.group(1))
+        if len(pts) < 3: return m.group(0)
+        return m.group(0).replace(m.group(1), ' '.join(f'{x:.1f},{y:.1f}' for x, y in _temblor(pts, rnd, .55, 6, cerrar=True)))
+    svg = re.sub(r'<polygon points="([^"]*)"', area, svg)
+    return re.sub(r'(<svg[^>]*>)', lambda m: m.group(1) + CSS_MANO, svg, count=1)
